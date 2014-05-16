@@ -1,4 +1,4 @@
 {
 	"modsDir": "testmods",
-	"server": "flungloaf.myftp.org:12312"
+	"server": "127.0.0.1:12312"
 }

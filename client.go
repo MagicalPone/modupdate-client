@@ -87,7 +87,8 @@ func LoadConfig(filename string) (config Config) {
 		log.Fatal(err)
 	}
 
-	config.ModsDir, err = filepath.Abs(config.ModsDir)
+	config.Server = os.ExpandEnv(config.Server)
+	config.ModsDir, err = filepath.Abs(os.ExpandEnv(config.ModsDir))
 
 	if err != nil {
 		log.Fatal(err)
@@ -97,7 +98,12 @@ func LoadConfig(filename string) (config Config) {
 }
 
 func main() {
-	config = LoadConfig("config.json")
+	configFileName := "config.json"
+	if len(os.Args) > 1 {
+		configFileName = os.Args[1]
+	}
+
+	config = LoadConfig(configFileName)
 
 	fmt.Println("Working with directory: " + config.ModsDir)
 	fmt.Println("Loading mod list from the server on " + config.Server)
