@@ -17,11 +17,14 @@ type Filelist struct {
 	Files []string
 }
 
-var modsdir, _ = filepath.Abs("testmods")
-var remotehostport = "flungloaf.myftp.org:12312"
+type Config struct {
+	ModsDir, Server string
+}
+
+var config Config
 
 func remote() (files []string) {
-	resp, err := http.Get("http://" + remotehostport + "/filelist")
+	resp, err := http.Get("http://" + config.Server + "/filelist")
 
 	if err != nil {
 		log.Fatal(err)
@@ -46,7 +49,7 @@ func remote() (files []string) {
 }
 
 func local() (files []string) {
-	list, err := ioutil.ReadDir(modsdir)
+	list, err := ioutil.ReadDir(config.ModsDir)
 
 	if err != nil {
 		log.Fatal(err)
@@ -69,9 +72,35 @@ func StringsToInterfaces(strings []string) []interface{} {
 	return vals
 }
 
+func LoadConfig(filename string) (config Config) {
+	configFile, err := os.Open(filename)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer configFile.Close()
+	dec := json.NewDecoder(configFile)
+	err = dec.Decode(&config)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	config.ModsDir, err = filepath.Abs(config.ModsDir)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return
+}
+
 func main() {
-	fmt.Println("Working with directory: " + modsdir)
-	fmt.Println("Loading mod list from the server on " + remotehostport)
+	config = LoadConfig("config.json")
+
+	fmt.Println("Working with directory: " + config.ModsDir)
+	fmt.Println("Loading mod list from the server on " + config.Server)
 
 	remote := remote()
 	local := local()
@@ -88,7 +117,7 @@ func main() {
 
 		fmt.Println("Removing " + fileNameS)
 
-		err := os.Remove(path.Join(modsdir, fileNameS))
+		err := os.Remove(path.Join(config.ModsDir, fileNameS))
 
 		if err != nil {
 			log.Fatal(err)
@@ -101,14 +130,14 @@ func main() {
 
 		fmt.Println("Downloading " + fileNameS)
 
-		out, err := os.Create(path.Join(modsdir, fileNameS))
+		out, err := os.Create(path.Join(config.ModsDir, fileNameS))
 		defer out.Close()
 
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		resp, err := http.Get("http://" + remotehostport + "/files/" + fileNameS)
+		resp, err := http.Get("http://" + config.Server + "/files/" + fileNameS)
 		defer resp.Body.Close()
 
 		if err != nil {
