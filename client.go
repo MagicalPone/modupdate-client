@@ -21,47 +21,46 @@ type Config struct {
 	ModsDir, Server string
 }
 
-var config Config
-
-func remote() (files []string) {
-	resp, err := http.Get("http://" + config.Server + "/filelist")
-
+func Assert(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
 
+func Must(val interface{}, err error) interface{} {
+	Assert(err)
+	return val
+}
+
+func FetchRemoteList(url string) (files []string) {
+	resp, err := http.Get(url)
+	Assert(err)
 	defer resp.Body.Close()
-	dec := json.NewDecoder(resp.Body)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	dec := json.NewDecoder(resp.Body)
 
 	var list Filelist
 	err = dec.Decode(&list)
-
-	if err != nil {
-		log.Fatal(err)
-	}
+	Assert(err)
 
 	files = list.Files
 	return
 }
 
-func local() (files []string) {
-	list, err := ioutil.ReadDir(config.ModsDir)
+func FetchLocalList(dir string) []string {
+	list, err := ioutil.ReadDir(dir)
+	Assert(err)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Allocate space for at most len(list) strings
+	files := make([]string, 0, len(list))
 
 	for _, fi := range list {
-		if !fi.IsDir() {
+		if !fi.IsDir() { // skip all the directories
 			files = append(files, fi.Name())
 		}
 	}
 
-	return
+	return files
 }
 
 func StringsToInterfaces(strings []string) []interface{} {
@@ -74,25 +73,16 @@ func StringsToInterfaces(strings []string) []interface{} {
 
 func LoadConfig(filename string) (config Config) {
 	configFile, err := os.Open(filename)
-
-	if err != nil {
-		log.Fatal(err)
-	}
+	Assert(err)
 
 	defer configFile.Close()
 	dec := json.NewDecoder(configFile)
 	err = dec.Decode(&config)
-
-	if err != nil {
-		log.Fatal(err)
-	}
+	Assert(err)
 
 	config.Server = os.ExpandEnv(config.Server)
 	config.ModsDir, err = filepath.Abs(os.ExpandEnv(config.ModsDir))
-
-	if err != nil {
-		log.Fatal(err)
-	}
+	Assert(err)
 
 	return
 }
@@ -103,13 +93,13 @@ func main() {
 		configFileName = os.Args[1]
 	}
 
-	config = LoadConfig(configFileName)
+	config := LoadConfig(configFileName)
 
 	fmt.Println("Working with directory: " + config.ModsDir)
 	fmt.Println("Loading mod list from the server on " + config.Server)
 
-	remote := remote()
-	local := local()
+	remote := FetchRemoteList("http://" + config.Server + "/filelist")
+	local := FetchLocalList(config.ModsDir)
 
 	remoteSet := mapset.NewSetFromSlice(StringsToInterfaces(remote))
 	localSet := mapset.NewSetFromSlice(StringsToInterfaces(local))
@@ -124,10 +114,7 @@ func main() {
 		fmt.Println("Removing " + fileNameS)
 
 		err := os.Remove(path.Join(config.ModsDir, fileNameS))
-
-		if err != nil {
-			log.Fatal(err)
-		}
+		Assert(err)
 	}
 
 	// Download files
@@ -138,23 +125,15 @@ func main() {
 
 		out, err := os.Create(path.Join(config.ModsDir, fileNameS))
 		defer out.Close()
-
-		if err != nil {
-			log.Fatal(err)
-		}
+		Assert(err)
 
 		resp, err := http.Get("http://" + config.Server + "/files/" + fileNameS)
+		Assert(err)
 		defer resp.Body.Close()
-
-		if err != nil {
-			log.Fatal(err)
-		}
 
 		_, err = io.Copy(out, resp.Body)
 
-		if err != nil {
-			log.Fatal(err)
-		}
+		Assert(err)
 	}
 
 	// fmt.Printf("%v\n", filesToDelete)
