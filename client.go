@@ -13,78 +13,87 @@ import (
 	"path/filepath"
 )
 
-type Filelist struct {
-	Files []string
+type file string
+
+func (f file) String() string {
+	return string(f)
 }
 
-type Config struct {
+type config struct {
 	ModsDir, Server string
 }
 
-func Assert(err error) {
+func assert(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func Must(val interface{}, err error) interface{} {
-	Assert(err)
-	return val
-}
-
-func FetchRemoteList(url string) (files []string) {
+func fetchRemoteList(url string) []file {
 	resp, err := http.Get(url)
-	Assert(err)
+	assert(err)
 	defer resp.Body.Close()
 
 	dec := json.NewDecoder(resp.Body)
 
-	var list Filelist
-	err = dec.Decode(&list)
-	Assert(err)
+	// Local struct for decoding input from the server
+	type filesList struct {
+		Files []file
+	}
 
-	files = list.Files
-	return
+	list := new(filesList)
+	err = dec.Decode(list)
+	assert(err)
+
+	return (*list).Files
 }
 
-func FetchLocalList(dir string) []string {
+func fetchLocalList(dir string) []file {
 	list, err := ioutil.ReadDir(dir)
-	Assert(err)
+	assert(err)
 
-	// Allocate space for at most len(list) strings
-	files := make([]string, 0, len(list))
+	// Allocate space for at most len(list) items
+	files := make([]file, 0, len(list))
 
 	for _, fi := range list {
 		if !fi.IsDir() { // skip all the directories
-			files = append(files, fi.Name())
+			files = append(files, file(fi.Name()))
 		}
 	}
 
 	return files
 }
 
-func StringsToInterfaces(strings []string) []interface{} {
-	vals := make([]interface{}, len(strings))
-	for i, v := range strings {
-		vals[i] = v
-	}
-	return vals
-}
-
-func LoadConfig(filename string) (config Config) {
+func loadConfig(filename string) (config config) {
 	configFile, err := os.Open(filename)
-	Assert(err)
-
+	assert(err)
 	defer configFile.Close()
+
 	dec := json.NewDecoder(configFile)
 	err = dec.Decode(&config)
-	Assert(err)
+	assert(err)
 
 	config.Server = os.ExpandEnv(config.Server)
 	config.ModsDir, err = filepath.Abs(os.ExpandEnv(config.ModsDir))
-	Assert(err)
+	assert(err)
 
 	return
+}
+
+func newFilesSet(files []file) mapset.Set {
+	set := mapset.NewSet()
+	for f := range files {
+		set.Add(f)
+	}
+	return set
+}
+
+func asyncFetchSet(f func() mapset.Set) <-chan mapset.Set {
+	c := make(chan mapset.Set, 1)
+	go func() {
+		c <- f()
+	}()
+	return c
 }
 
 func main() {
@@ -93,16 +102,22 @@ func main() {
 		configFileName = os.Args[1]
 	}
 
-	config := LoadConfig(configFileName)
+	config := loadConfig(configFileName)
 
 	fmt.Println("Working with directory: " + config.ModsDir)
 	fmt.Println("Loading mod list from the server on " + config.Server)
 
-	remote := FetchRemoteList("http://" + config.Server + "/filelist")
-	local := FetchLocalList(config.ModsDir)
+	// Run async tasks
+	remotec := asyncFetchSet(func() mapset.Set {
+		return newFilesSet(fetchRemoteList("http://" + config.Server + "/filelist"))
+	})
+	localc := asyncFetchSet(func() mapset.Set {
+		return newFilesSet(fetchLocalList(config.ModsDir))
+	})
 
-	remoteSet := mapset.NewSetFromSlice(StringsToInterfaces(remote))
-	localSet := mapset.NewSetFromSlice(StringsToInterfaces(local))
+	// Wait for data
+	localSet := <-localc
+	remoteSet := <-remotec
 
 	filesToDownload := remoteSet.Difference(localSet)
 	filesToDelete := localSet.Difference(remoteSet)
@@ -114,7 +129,7 @@ func main() {
 		fmt.Println("Removing " + fileNameS)
 
 		err := os.Remove(path.Join(config.ModsDir, fileNameS))
-		Assert(err)
+		assert(err)
 	}
 
 	// Download files
@@ -125,15 +140,15 @@ func main() {
 
 		out, err := os.Create(path.Join(config.ModsDir, fileNameS))
 		defer out.Close()
-		Assert(err)
+		assert(err)
 
 		resp, err := http.Get("http://" + config.Server + "/files/" + fileNameS)
-		Assert(err)
+		assert(err)
 		defer resp.Body.Close()
 
 		_, err = io.Copy(out, resp.Body)
 
-		Assert(err)
+		assert(err)
 	}
 
 	// fmt.Printf("%v\n", filesToDelete)
